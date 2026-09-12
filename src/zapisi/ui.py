@@ -6,7 +6,6 @@ from textual.containers import Container, Vertical, Horizontal, Grid
 from textual.widgets import Header, Footer, Button, Input, Label, DataTable, Static, ListItem, ListView, Select
 from textual.screen import Screen
 from textual.binding import Binding
-from textual_plotext import PlotextPlot
 from textual.theme import Theme
 
 from sqlmodel import select, func
@@ -181,13 +180,9 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Grid(id="main-grid"):
-            with Vertical(id="stats-pane"):
-                yield Label("Monthly Stats")
-                yield PlotextPlot(id="stats-plot")
-            with Vertical(id="txn-pane"):
-                yield Label("Recent Transactions")
-                yield DataTable(id="txn-table")
+        with Vertical(id="txn-pane"):
+            yield Label("Recent Transactions")
+            yield DataTable(id="txn-table")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -204,44 +199,7 @@ class MainScreen(Screen):
             for txn in txns:
                 table.add_row(txn.created_at.strftime("%Y-%m-%d"), txn.transaction_type, str(txn.amount), txn.description or "")
                 
-            # Plot stats
-            now = datetime.now()
-            start_of_month = datetime(now.year, now.month, 1)
-            
-            stats = session.exec(
-                select(
-                    func.date(Transaction.created_at),
-                    Transaction.transaction_type,
-                    func.sum(Transaction.amount)
-                )
-                .where(Transaction.user_id == self.app.user_id)
-                .where(Transaction.created_at >= start_of_month)
-                .group_by(func.date(Transaction.created_at), Transaction.transaction_type)
-            ).all()
 
-            daily_stats = {}
-            for date, type_, total in stats:
-                if date not in daily_stats:
-                    daily_stats[date] = {"credit": 0, "debit": 0}
-                if type_ == "credit":
-                    daily_stats[date]["credit"] = total
-                else:
-                    daily_stats[date]["debit"] = total
-
-            dates = sorted(daily_stats.keys())
-            credits = [daily_stats[d]["credit"] for d in dates]
-            debits = [daily_stats[d]["debit"] for d in dates]
-
-            plot = self.query_one(PlotextPlot)
-            plt = plot.plt
-            plt.clear_figure()
-            if dates:
-                plt.theme("clear")
-                plt.title("Monthly Transactions")
-                plt.multiple_bar(dates, [credits, debits], labels=["Credit", "Debit"])
-            else:
-                plt.title("No transactions this month")
-            plot.refresh()
 
     def action_add_transaction(self) -> None:
         self.app.push_screen(AddTransactionScreen())
