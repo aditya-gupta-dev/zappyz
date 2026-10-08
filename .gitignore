@@ -13,3 +13,10 @@ wheels/
 database.db
 session.json
 test_theme.py
+
+# Local profile data and SQLite sidecars
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.ruff_cache/

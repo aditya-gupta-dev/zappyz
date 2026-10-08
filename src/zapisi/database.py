@@ -1,37 +1,51 @@
-from sqlmodel import SQLModel, create_engine, Session, select
-from .models import User, PaymentMode, Category, Merchant, Transaction
+"""Database ownership and default data for a single local profile."""
 
-sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
-engine = create_engine(sqlite_url)
+from pathlib import Path
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-    init_defaults()
+from sqlalchemy import Engine, event
+from sqlmodel import Session, SQLModel, create_engine, select
 
-def init_defaults():
-    with Session(engine) as session:
-        # Check and add modes
-        modes = ['UPI', 'Bank', 'Cash', 'Crypto', 'Other']
-        for mode in modes:
-            if not session.exec(select(PaymentMode).where(PaymentMode.name == mode)).first():
-                session.add(PaymentMode(name=mode))
-        
-        main_cats = ['Food', 'Travel', 'Fees', 'Misc', 'Rent']
-        for cat_name in main_cats:
-            cat = session.exec(select(Category).where(Category.name == cat_name)).first()
-            if not cat:
-                cat = Category(name=cat_name)
-                session.add(cat)
-                session.commit()
-                session.refresh(cat)
-            
-            if cat_name == 'Food':
-                sub_cats = ['Breakfast', 'Lunch', 'Snacks', 'Dinner']
-                for sub in sub_cats:
-                    if not session.exec(select(Category).where(Category.name == sub, Category.parent_id == cat.id)).first():
-                        session.add(Category(name=sub, parent_id=cat.id))
-        session.commit()
+from .models import Category, PaymentMode, ProfileInfo
 
-def get_session():
-    return Session(engine)
+
+class Database:
+    def __init__(self, path: Path):
+        self.path = path
+        self.engine: Engine = create_engine(f"sqlite:///{path}")
+        event.listen(self.engine, "connect", self._enable_foreign_keys)
+
+    @staticmethod
+    def _enable_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    def initialize(self, profile_name: str) -> None:
+        SQLModel.metadata.create_all(self.engine)
+        with self.session() as session:
+            if session.get(ProfileInfo, 1) is None:
+                session.add(ProfileInfo(name=profile_name))
+            for name in ("UPI", "Bank", "Cash", "Crypto", "Other"):
+                if not session.exec(select(PaymentMode).where(PaymentMode.name == name)).first():
+                    session.add(PaymentMode(name=name))
+            for name in ("Food", "Travel", "Fees", "Misc", "Rent"):
+                category = session.exec(
+                    select(Category).where(Category.name == name, Category.parent_id.is_(None))
+                ).first()
+                if category is None:
+                    category = Category(name=name)
+                    session.add(category)
+                    session.flush()
+                if name == "Food":
+                    for child in ("Breakfast", "Lunch", "Snacks", "Dinner"):
+                        if not session.exec(
+                            select(Category).where(
+                                Category.name == child, Category.parent_id == category.id
+                            )
+                        ).first():
+                            session.add(Category(name=child, parent_id=category.id))
+            session.commit()
+
+    def session(self) -> Session:
+        return Session(self.engine)
+
+    def close(self) -> None:
+        self.engine.dispose()
